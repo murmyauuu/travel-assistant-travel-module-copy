@@ -1,0 +1,281 @@
+// Prisma schema - Travel-pomoshchnik
+// Local: SQLite. For Vercel: change provider to "postgresql" and DATABASE_URL (see README).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  initials     String?
+  telegram     String?
+  emailContact String?
+  notifyPrefs  String?
+  appearance   String?
+  createdAt    DateTime @default(now())
+
+  ownedTrips    Trip[]             @relation("TripOwner")
+  participants  Participant[]
+  documents     Document[]
+  messages      Message[]
+  assistantMsgs AssistantMessage[]
+  appliedPlans  TripPlan[]
+  tripChanges   TripChange[] @relation("TripChangeActor")
+  acceptedInvitations Invitation[] @relation("InvitationAcceptedBy")
+
+  telegramLink  TelegramLink?
+  linkTokens    TelegramLinkToken[] @relation("UserLinkTokens")
+}
+
+model Trip {
+  id        String    @id @default(cuid())
+  title     String
+  route     String?
+  segments  String?
+  startDate DateTime?
+  endDate   DateTime?
+  status    String    @default("active")
+  type      String    @default("group")
+  ownerId   String
+  owner     User      @relation("TripOwner", fields: [ownerId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  participants      Participant[]
+  invitations       Invitation[]
+  documents         Document[]
+  messages          Message[]
+  monitoringSignals MonitoringSignal[]
+  offlineCopy       OfflineCopy?
+  assistantMsgs     AssistantMessage[]
+  plans             TripPlan[]
+  changes           TripChange[]
+}
+
+model TripChange {
+  id         String   @id @default(cuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  actorId    String?
+  actor      User?    @relation("TripChangeActor", fields: [actorId], references: [id])
+  type       String
+  oldValue   String?
+  newValue   String?
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@index([tripId, createdAt])
+  @@index([type])
+}
+
+model Participant {
+  id         String   @id @default(cuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  name       String
+  initials   String?
+  shortLabel String?
+  role       String   @default("participant")
+  access     String   @default("active")
+  telegram   String   @default("none")
+  joined     DateTime @default(now())
+  tone       String?
+}
+
+model Invitation {
+  id        String    @id @default(cuid())
+  tripId    String
+  trip      Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  email     String
+  role      String    @default("participant")
+  status    String    @default("pending")
+  token     String    @unique @default(cuid())
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+  acceptedAt DateTime?
+  acceptedById String?
+  acceptedBy User? @relation("InvitationAcceptedBy", fields: [acceptedById], references: [id])
+}
+
+model Document {
+  id           String    @id @default(cuid())
+  tripId       String
+  trip         Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  name         String
+  type         String?
+  format       String?
+  sizeLabel    String?
+  sizeMb       Float?
+  status       String    @default("review")
+  ocrConfirmed Boolean   @default(false)
+  visibility   String    @default("shared")
+  segment      String?
+  source       String?
+  uploadedById String?
+  uploadedBy   User?     @relation(fields: [uploadedById], references: [id])
+  uploadedAt   DateTime  @default(now())
+  processedAt  DateTime?
+  mimeType     String?
+  ocrStatus    String?
+  ocrText      String?
+  ocrData      String?
+  blob         DocumentBlob?
+}
+
+model DocumentBlob {
+  id         String   @id @default(cuid())
+  documentId String   @unique
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  data       Bytes
+  createdAt  DateTime @default(now())
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  channel     String   @default("system")
+  kind        String   @default("draft")
+  title       String?
+  body        String?
+  recipients  String?
+  status      String?
+  planBLinked Boolean  @default(false)
+  authorId    String?
+  author      User?    @relation(fields: [authorId], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model MonitoringSignal {
+  id        String   @id @default(cuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  label     String
+  status    String?
+  severity  String?
+  segment   String?
+  source    String?
+  detail    String?
+  authorId       String?
+  number         String?
+  category       String?
+  idempotencyKey String? @unique
+  createdAt DateTime @default(now())
+}
+
+model OfflineCopy {
+  tripId              String    @id
+  trip                Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  status              String    @default("saved")
+  savedAt             DateTime?
+  size                Float?
+  includeRouteMap     Boolean   @default(true)
+  includeObservations Boolean   @default(true)
+  includeDocuments    Boolean   @default(true)
+  selectedDocuments   String?
+}
+
+model AssistantMessage {
+  id        String   @id @default(cuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  role      String
+  content   String
+  mode      String?
+  createdAt DateTime @default(now())
+}
+
+
+// ---- Telegram bot integration ----
+
+model TelegramLink {
+  telegramUserId String   @id
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeTripId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model TelegramLinkToken {
+  token     String    @id
+  userId    String
+  user      User      @relation("UserLinkTokens", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+}
+
+model TelegramNotification {
+  id             String    @id @default(cuid())
+  eventId        String    @unique
+  type           String
+  telegramUserId String
+  tripId         String?
+  tripTitle      String?
+  title          String?
+  whatChanged    String?
+  oldValue       String?
+  newValue       String?
+  sosId          String?
+  deepLinkTarget String    @default("trip")
+  source         String    @default("backend")
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  lastError      String?
+  occurredAt     DateTime  @default(now())
+  deliveredAt    DateTime?
+
+  @@index([status])
+  @@index([telegramUserId])
+}
+
+model TripPlan {
+  id           String   @id @default(cuid())
+  tripId       String
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  title        String
+  strategy     String?
+  revisedRoute String?
+  segments     String?
+  totalDuration String?
+  estimatedCost Float?
+  currency     String?
+  delayComparedToOriginal String?
+  transferCount Int?
+  reliability String?
+  risks        String?
+  assumptions  String?
+  requiredActions String?
+  hotelImpact  String?
+  transferImpact String?
+  activitiesImpact String?
+  isDemoData   Boolean  @default(false)
+  summary      String?
+  steps        String?
+  pros         String?
+  cons         String?
+  whenToUse    String?
+  emailTo      String?
+  emailSubject String?
+  emailBody    String?
+  source       String   @default("ai")
+  status       String   @default("active")
+  appliedById  String?
+  appliedBy    User?    @relation(fields: [appliedById], references: [id])
+  createdAt    DateTime @default(now())
+  appliedAt    DateTime?
+}
